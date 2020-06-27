@@ -5,7 +5,7 @@ from collections import defaultdict
 
 class Agent:
 
-    def __init__(self, nA=6):
+    def __init__(self, nA=6, epsilon=0.08926, gamma=0.8597, epsilon_divisor = 17.87):
         """ Initialize agent.
 
         Params
@@ -14,23 +14,10 @@ class Agent:
         """
         self.nA = nA
         self.Q = defaultdict(lambda: np.zeros(self.nA))
-        self.episode_num = 1
 
-        self.min_epsilon = 0.005
-        self.max_epsilon = 0.7
-        self.min_epsilon_iter_val = 15000
-        self.alpha = 0.01
-        self.epsilon = self.get_epsilon()
-
-    def get_epsilon(self):
-        # return 0.9
-
-        if self.episode_num >= self.min_epsilon_iter_val:
-            return self.min_epsilon
-
-        return self.max_epsilon + (self.min_epsilon - self.max_epsilon) * self.episode_num / self.min_epsilon_iter_val
-
-        #return math.pow(2, math.log2(self.max_epsilon) + (math.log2(self.min_epsilon) - math.log2(self.max_epsilon)) * self.episode_num/ (self.min_epsilon_iter_val))
+        self.epsilon = epsilon
+        self.gamma = gamma
+        self.epsilon_divisor = epsilon_divisor
 
     def epsilon_greedy_distribution(self, state):
         dist: np.ndarray = np.zeros(self.nA) + self.epsilon / self.nA
@@ -62,10 +49,10 @@ class Agent:
         - next_state: the current state of the environment
         - done: whether the episode is complete (True or False)
         """
-        if done:
-            self.episode_num += 1
-            self.epsilon = self.get_epsilon()
 
         expected_next_action_distribution = self.epsilon_greedy_distribution(next_state)
         expected_next_action_value = sum([self.Q[next_state][a] * a_prob for a, a_prob in enumerate(expected_next_action_distribution)])
-        self.Q[state][action] = reward + expected_next_action_value  # alpha == 1
+        self.Q[state][action] = reward + self.gamma * expected_next_action_value  # alpha == 1
+
+        if done:
+            self.epsilon /= self.epsilon_divisor
