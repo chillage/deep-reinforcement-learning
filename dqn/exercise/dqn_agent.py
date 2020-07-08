@@ -2,20 +2,20 @@ import numpy as np
 import random
 from collections import namedtuple, deque
 
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
+
 from model import QNetwork
 
-import torch
-import torch.nn.functional as F
-import torch.optim as optim
 
 BUFFER_SIZE = int(1e5)  # replay buffer size
-BATCH_SIZE = 64         # minibatch size
+BATCH_SIZE = 1024 # 64         # minibatch size
 GAMMA = 0.99            # discount factor
-TAU = 1e-3              # for soft update of target parameters
+#TAU = 1e-3              # for soft update of target parameters
 LR = 5e-4               # learning rate 
-UPDATE_EVERY = 4        # how often to update the network
-
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+UPDATE_EVERY = 64        # how often to update the network
+EPS_GREEDY = 0.1
 
 class Agent():
     """Interacts with and learns from the environment."""
@@ -31,18 +31,43 @@ class Agent():
         """
         self.state_size = state_size
         self.action_size = action_size
-        self.seed = random.seed(seed)
+        tf.random.set_seed(seed)
 
         # Q-Network
-        self.qnetwork_local = QNetwork(state_size, action_size, seed).to(device)
-        self.qnetwork_target = QNetwork(state_size, action_size, seed).to(device)
-        self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=LR)
+        self.localActionModels, self.localFullModel = self.create_network(state_size, action_size)
+        self.targetActionModels, self.targetFullModel = self.create_network(state_size, action_size)
 
         # Replay memory
         self.memory = ReplayBuffer(action_size, BUFFER_SIZE, BATCH_SIZE, seed)
         # Initialize time step (for updating every UPDATE_EVERY steps)
         self.t_step = 0
-    
+
+    def create_network(self, state_size : int, action_size : int):
+        inputs = keras.Input(shape=(state_size,), name="lunar_state")
+
+        hiddenLayers = layers.Dense(6, activation="relu", name="hidden1")(inputs)
+        hiddenLayers = layers.Dense(4, activation="relu", name="hidden2")(hiddenLayers)
+
+        activationLayers = [layers.Dense(1, activation=keras.activations.linear, name="action_" + str(action))(hiddenLayers) for action in range(action_size)]
+
+        # share the optimizer between different models so that they all share the same params
+        optimizer = keras.optimizers.Adam()
+        actionModels = []
+
+        for action in range(action_size):
+
+            actionModel = keras.models.Model(inputs=inputs, outputs=activationLayers[action], name="action_model_" + str(action))
+
+            loss = 'mse'
+            metrics = ['mae', 'mse']
+            actionModel.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+
+            actionModels.append(actionModel)
+
+        fullModel = keras.layers.Concatenate()(activationLayers)
+
+        return actionModels, fullModel
+
     def step(self, state, action, reward, next_state, done):
         # Save experience in replay memory
         self.memory.add(state, action, reward, next_state, done)
@@ -55,7 +80,7 @@ class Agent():
                 experiences = self.memory.sample()
                 self.learn(experiences, GAMMA)
 
-    def act(self, state, eps=0.):
+    def act(self, state, eps=EPS_GREEDY):
         """Returns actions for given state as per current policy.
         
         Params
@@ -63,15 +88,11 @@ class Agent():
             state (array_like): current state
             eps (float): epsilon, for epsilon-greedy action selection
         """
-        state = torch.from_numpy(state).float().unsqueeze(0).to(device)
-        self.qnetwork_local.eval()
-        with torch.no_grad():
-            action_values = self.qnetwork_local(state)
-        self.qnetwork_local.train()
+        action_values = self.localFullModel([state])[0].numpy()
 
         # Epsilon-greedy action selection
         if random.random() > eps:
-            return np.argmax(action_values.cpu().data.numpy())
+            return np.argmax(action_values)
         else:
             return random.choice(np.arange(self.action_size))
 
@@ -83,15 +104,26 @@ class Agent():
             experiences (Tuple[torch.Tensor]): tuple of (s, a, r, s', done) tuples 
             gamma (float): discount factor
         """
-        states, actions, rewards, next_states, dones = experiences
+        #states, actions, rewards, next_states, dones = experiences
 
-        ## TODO: compute and minimize the loss
-        "*** YOUR CODE HERE ***"
+        for state, action, reward, next_state, done in experiences:
+            localActionModel : keras.Model = self.localActionModels[action]
+
+            if done:
+                y = reward
+            else:
+                y = reward + gamma * self.targetFullModel(next_state)[0].numpy().max()
+
+            localActionModel.fit([state], [y], epochs=1)
 
         # ------------------- update target network ------------------- #
-        self.soft_update(self.qnetwork_local, self.qnetwork_target, TAU)                     
+        self.update(self.localFullModel, self.targetFullModel)
 
-    def soft_update(self, local_model, target_model, tau):
+
+    def update(self, local_model : keras.Sequential, target_model : keras.Sequential):
+        #hard update instead
+        target_model.set_weights(local_model.get_weights())
+
         """Soft update model parameters.
         θ_target = τ*θ_local + (1 - τ)*θ_target
 
@@ -99,10 +131,21 @@ class Agent():
         ======
             local_model (PyTorch model): weights will be copied from
             target_model (PyTorch model): weights will be copied to
-            tau (float): interpolation parameter 
+            tau (float): interpolation parameter
         """
-        for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
-            target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
+        # for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
+        #     target_param.data.copy_(tau*local_param.data + (1.0-TAU)*target_param.data)
+
+    def save(self, pathPrefix : str):
+        self.localFullModel.save_weights(pathPrefix + ".ckpt")
+        for i in range(self.action_size):
+            self.localActionModels[i].save_weights(pathPrefix + "_" + str(i) + ".ckpt")
+
+    def load(self, pathPrefix : str):
+        self.localFullModel.load_weights(pathPrefix + ".ckpt")
+        for i in range(self.action_size):
+            self.localActionModels[i].load_weights(pathPrefix + "_" + str(i) + ".ckpt")
+
 
 
 class ReplayBuffer:
@@ -133,13 +176,17 @@ class ReplayBuffer:
         """Randomly sample a batch of experiences from memory."""
         experiences = random.sample(self.memory, k=self.batch_size)
 
-        states = torch.from_numpy(np.vstack([e.state for e in experiences if e is not None])).float().to(device)
-        actions = torch.from_numpy(np.vstack([e.action for e in experiences if e is not None])).long().to(device)
-        rewards = torch.from_numpy(np.vstack([e.reward for e in experiences if e is not None])).float().to(device)
-        next_states = torch.from_numpy(np.vstack([e.next_state for e in experiences if e is not None])).float().to(device)
-        dones = torch.from_numpy(np.vstack([e.done for e in experiences if e is not None]).astype(np.uint8)).float().to(device)
+        return experiences
+
+        '''
+        states = [e.state for e in experiences]
+        actions = [e.action for e in experiences]
+        rewards = [e.reward for e in experiences]
+        next_states = [e.next_state for e in experiences]
+        dones = [e.done for e in experiences]
   
         return (states, actions, rewards, next_states, dones)
+        '''
 
     def __len__(self):
         """Return the current size of internal memory."""
