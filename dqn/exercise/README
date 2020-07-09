@@ -1,7 +1,7 @@
 Run the following on the Udacity GPU machine to setup the TF 2.2 GPU support:
 
 pip install --upgrade pip setuptools &&
-pip install --upgrade protobuf dask pyyaml h5py jsonschema six widgetsnbextension ipywidgets tensorflow==2.2.0 &&
+pip install --upgrade protobuf dask numpy h5py jsonschema six widgetsnbextension ipywidgets tensorflow==2.2.0 &&
 sudo add-apt-repository ppa:graphics-drivers &&
 sudo apt update &&
 sudo apt install cuda-10-1 libcudnn7 -y

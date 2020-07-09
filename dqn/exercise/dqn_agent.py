@@ -6,7 +6,6 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 
-from model import QNetwork
 
 
 BUFFER_SIZE = int(1e5)  # replay buffer size
@@ -64,7 +63,8 @@ class Agent():
 
             actionModels.append(actionModel)
 
-        fullModel = keras.layers.Concatenate()(activationLayers)
+        fullFinalLayer = keras.layers.Concatenate()(activationLayers)
+        fullModel = keras.models.Model(inputs=inputs, outputs=fullFinalLayer, name="full_model")
 
         return actionModels, fullModel
 
@@ -88,7 +88,7 @@ class Agent():
             state (array_like): current state
             eps (float): epsilon, for epsilon-greedy action selection
         """
-        action_values = self.localFullModel([state])[0].numpy()
+        action_values = self.localFullModel(state.reshape([1,self.state_size]))[0].numpy()
 
         # Epsilon-greedy action selection
         if random.random() > eps:
@@ -112,9 +112,9 @@ class Agent():
             if done:
                 y = reward
             else:
-                y = reward + gamma * self.targetFullModel(next_state)[0].numpy().max()
+                y = reward + gamma * self.targetFullModel(next_state.reshape([1,self.state_size]))[0].numpy().max()
 
-            localActionModel.fit([state], [y], epochs=1)
+            localActionModel.fit(state.reshape([1,self.state_size]), np.array([y]).reshape([1,1]), epochs=1, verbose=0)
 
         # ------------------- update target network ------------------- #
         self.update(self.localFullModel, self.targetFullModel)
