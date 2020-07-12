@@ -9,12 +9,11 @@ from tensorflow.keras import layers
 
 
 BUFFER_SIZE = int(1e5)  # replay buffer size
-BATCH_SIZE = 1024 # 64         # minibatch size
+BATCH_SIZE = 64         # minibatch size
 GAMMA = 0.99            # discount factor
-#TAU = 1e-3              # for soft update of target parameters
+TAU = 1e-3              # for soft update of target parameters
 LR = 5e-4               # learning rate 
-UPDATE_EVERY = 64        # how often to update the network
-EPS_GREEDY = 0.1
+UPDATE_EVERY = 4        # how often to update the network
 
 class Agent():
     """Interacts with and learns from the environment."""
@@ -36,6 +35,9 @@ class Agent():
         self.localActionModels, self.localFullModel = self.create_network(state_size, action_size)
         self.targetActionModels, self.targetFullModel = self.create_network(state_size, action_size)
 
+        self.optimizer = keras.optimizers.Adam(learning_rate=LR)
+        self.loss_fn = keras.losses.MeanSquaredError()
+
         # Replay memory
         self.memory = ReplayBuffer(action_size, BUFFER_SIZE, BATCH_SIZE, seed)
         # Initialize time step (for updating every UPDATE_EVERY steps)
@@ -44,24 +46,13 @@ class Agent():
     def create_network(self, state_size : int, action_size : int):
         inputs = keras.Input(shape=(state_size,), name="lunar_state")
 
-        hiddenLayers = layers.Dense(6, activation="relu", name="hidden1")(inputs)
-        hiddenLayers = layers.Dense(4, activation="relu", name="hidden2")(hiddenLayers)
+        hiddenLayers = layers.Dense(64, activation="relu", name="hidden1")(inputs)
+        hiddenLayers = layers.Dense(64, activation="relu", name="hidden2")(hiddenLayers)
+        #hiddenLayers = layers.Dense(4, activation="relu", name="hidden3")(hiddenLayers)
 
         activationLayers = [layers.Dense(1, activation=keras.activations.linear, name="action_" + str(action))(hiddenLayers) for action in range(action_size)]
 
-        # share the optimizer between different models so that they all share the same params
-        optimizer = keras.optimizers.Adam()
-        actionModels = []
-
-        for action in range(action_size):
-
-            actionModel = keras.models.Model(inputs=inputs, outputs=activationLayers[action], name="action_model_" + str(action))
-
-            loss = 'mse'
-            metrics = ['mae', 'mse']
-            actionModel.compile(optimizer=optimizer, loss=loss, metrics=metrics)
-
-            actionModels.append(actionModel)
+        actionModels = [keras.models.Model(inputs=inputs, outputs=activationLayers[action], name="action_model_" + str(action)) for action in range(action_size)]
 
         fullFinalLayer = keras.layers.Concatenate()(activationLayers)
         fullModel = keras.models.Model(inputs=inputs, outputs=fullFinalLayer, name="full_model")
@@ -80,7 +71,7 @@ class Agent():
                 experiences = self.memory.sample()
                 self.learn(experiences, GAMMA)
 
-    def act(self, state, eps=EPS_GREEDY):
+    def act(self, state, eps):
         """Returns actions for given state as per current policy.
         
         Params
@@ -105,24 +96,66 @@ class Agent():
             gamma (float): discount factor
         """
         #states, actions, rewards, next_states, dones = experiences
+        #print("learning...")
 
-        for state, action, reward, next_state, done in experiences:
-            localActionModel : keras.Model = self.localActionModels[action]
+        '''
+        - wrap with gradient tape to keep track of operations on each tensor:
 
-            if done:
-                y = reward
-            else:
-                y = reward + gamma * self.targetFullModel(next_state.reshape([1,self.state_size]))[0].numpy().max()
+run forward pass of each *individual* action model. The tensors used will be automatically recorded
+outputsForAction1 = actionModel1(action1Train, training=True)
 
-            localActionModel.fit(state.reshape([1,self.state_size]), np.array([y]).reshape([1,1]), epochs=1, verbose=0)
+side by side, keep the expected value of each individual action model
+trueOutputsAction1
 
+all_train_y = concat(trueOutputsAction_i)
+all_outputs = concat(outputsForAction_i)
+
+full_loss = loss_fn(all_train_y, all_outputs)
+
+-- come out of with gradient tape
+
+grads = tape.gradient(full_loss, fullModel.trainable_weights)'''
+
+        y_vals = [reward + gamma * self.targetFullModel(next_state.reshape([1,self.state_size]))[0].numpy().max() * done
+                  for state, action, reward, next_state, done in experiences]
+
+        experiencesPerAction = []
+        y_valsPerAction = []
+        for action in range(self.action_size):
+            experienceIndices = [i for i, experience in enumerate(experiences) if experience.action == action]
+            experiencesPerAction.append([experiences[i] for i in experienceIndices])
+            y_valsPerAction.append([y_vals[i] for i in experienceIndices])
+
+        with tf.GradientTape() as tape:
+
+            predictions = None
+            ordered_y_vals = []
+
+            for action in range(self.action_size):
+                startStates = [state for state, action, reward, next_state, done in experiencesPerAction[action]]
+                curPrediction = self.localActionModels[action](np.stack(startStates, axis=0), training=True)
+                if predictions is None:
+                    predictions = curPrediction
+                else:
+                    predictions = tf.concat([predictions, curPrediction], axis=0)
+                ordered_y_vals += y_valsPerAction[action]
+
+            loss_value = self.loss_fn(ordered_y_vals, predictions)
+
+        grads = tape.gradient(loss_value, self.localFullModel.trainable_weights)
+        self.optimizer.apply_gradients(zip(grads, self.localFullModel.trainable_weights))
+
+        #print("done learning")
         # ------------------- update target network ------------------- #
         self.update(self.localFullModel, self.targetFullModel)
 
 
     def update(self, local_model : keras.Sequential, target_model : keras.Sequential):
         #hard update instead
-        target_model.set_weights(local_model.get_weights())
+        #target_model.set_weights(local_model.get_weights())
+        target_weights = target_model.get_weights()
+        local_weights = local_model.get_weights()
+        target_model.set_weights([target_weights[weightIndex] * (1 - TAU) + local_weights[weightIndex] * TAU for weightIndex in range(len(local_model.get_weights()))])
 
         """Soft update model parameters.
         θ_target = τ*θ_local + (1 - τ)*θ_target
