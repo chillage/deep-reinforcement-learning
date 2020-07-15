@@ -30,7 +30,7 @@ class Agent():
         #disable_eager_execution()
         self.state_size = state_size
         self.action_size = action_size
-        tf.random.set_seed(seed)
+        #tf.random.set_seed(seed)
 
         # Q-Network
         self.localModel = self.create_network(state_size, action_size)
@@ -89,23 +89,15 @@ class Agent():
             experiences (Tuple[torch.Tensor]): tuple of (s, a, r, s', done) tuples 
             gamma (float): discount factor
         """
-        #states, actions, rewards, next_states, dones = experiences
-        #print("learning...")
 
-        y_vals = [reward + gamma * self.targetModel(next_state.reshape([1, self.state_size]))[0].numpy().max() * done
-                  for state, action, reward, next_state, done in experiences]
-        '''
-                experiencesPerAction = []
-                y_valsPerAction = []
-                for action in range(self.action_size):
-                    experienceIndices = [i for i, experience in enumerate(experiences) if experience.action == action]
-                    experiencesPerAction.append([experiences[i] for i in experienceIndices])
-                    y_valsPerAction.append([y_vals[i] for i in experienceIndices])
-        '''
+        states, actions, rewards, next_states, dones = experiences
+
+        y_vals = rewards + gamma * tf.reduce_max(self.targetModel(states), axis = 1) * (1 - dones)
+
         with tf.GradientTape() as tape:
-            actionIndices = [[i, experience.action] for i, experience in enumerate(experiences)]
+            actionIndices = np.stack([np.array([i, action]) for i, action in enumerate(actions)])
 
-            fullPredictions = self.localModel(np.stack([state for state, _, _, _, _ in experiences]), training=True)
+            fullPredictions = self.localModel(states, training=True)
             predictions = tf.gather_nd(fullPredictions,actionIndices)
 
             loss_value = self.loss_fn(y_vals, predictions)
@@ -119,33 +111,19 @@ class Agent():
 
 
     def update(self, local_model : keras.Sequential, target_model : keras.Sequential):
+
         #hard update instead
         #target_model.set_weights(local_model.get_weights())
         target_weights = target_model.get_weights()
         local_weights = local_model.get_weights()
         target_model.set_weights([target_weights[weightIndex] * (1 - TAU) + local_weights[weightIndex] * TAU for weightIndex in range(len(local_model.get_weights()))])
 
-        """Soft update model parameters.
-        θ_target = τ*θ_local + (1 - τ)*θ_target
-
-        Params
-        ======
-            local_model (PyTorch model): weights will be copied from
-            target_model (PyTorch model): weights will be copied to
-            tau (float): interpolation parameter
-        """
-        # for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
-        #     target_param.data.copy_(tau*local_param.data + (1.0-TAU)*target_param.data)
 
     def save(self, pathPrefix : str):
         self.localModel.save_weights(pathPrefix + ".ckpt")
-        for i in range(self.action_size):
-            self.localActionModels[i].save_weights(pathPrefix + "_" + str(i) + ".ckpt")
 
     def load(self, pathPrefix : str):
         self.localModel.load_weights(pathPrefix + ".ckpt")
-        for i in range(self.action_size):
-            self.localActionModels[i].load_weights(pathPrefix + "_" + str(i) + ".ckpt")
 
 
 
@@ -177,17 +155,16 @@ class ReplayBuffer:
         """Randomly sample a batch of experiences from memory."""
         experiences = random.sample(self.memory, k=self.batch_size)
 
-        return experiences
+        #return experiences
 
-        '''
-        states = [e.state for e in experiences]
-        actions = [e.action for e in experiences]
-        rewards = [e.reward for e in experiences]
-        next_states = [e.next_state for e in experiences]
-        dones = [e.done for e in experiences]
+        states = np.stack([e.state for e in experiences if e is not None])
+        actions = np.stack([e.action for e in experiences if e is not None])
+        rewards = np.stack([e.reward for e in experiences if e is not None])
+        next_states = np.stack([e.next_state for e in experiences if e is not None])
+        dones = np.stack([e.done for e in experiences if e is not None])
   
         return (states, actions, rewards, next_states, dones)
-        '''
+
 
     def __len__(self):
         """Return the current size of internal memory."""
