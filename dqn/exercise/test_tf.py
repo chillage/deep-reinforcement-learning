@@ -21,7 +21,7 @@ for layer in model.layers[1:]:
 
     for i in range(weight.shape[0]):
         for j in range(weight.shape[1]):
-            weight[i, j] = ((i - 3) * 2) + pow((j - 1) * 1.2, 3)
+            weight[i, j] = ((j - 3) * 2) + pow((i - 1) * 1.2, 3)
 
     for i in range(bias.shape[0]):
         bias[i] = 2 - i

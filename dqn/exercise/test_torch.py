@@ -35,7 +35,7 @@ with torch.no_grad():
 
     network.eval()
 
-    layers = [network.fc1, network.fc2]
+    layers = [network.fc1, network.fc2, network.fc3]
 
     for layer in layers:
         weight = layer.weight
