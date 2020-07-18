@@ -5,6 +5,7 @@ from collections import namedtuple, deque
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+from tensorflow.keras import initializers
 from tensorflow.python.framework.ops import disable_eager_execution
 
 
@@ -73,7 +74,7 @@ class Agent():
             state (array_like): current state
             eps (float): epsilon, for epsilon-greedy action selection
         """
-        action_values = self.localModel(state.reshape([1, self.state_size]))[0]
+        action_values = self.localModel(state.reshape([1, self.state_size]), training=False)[0]
 
         # Epsilon-greedy action selection
         if random.random() > eps:
@@ -92,15 +93,15 @@ class Agent():
 
         states, actions, rewards, next_states, dones = experiences
 
-        y_vals = rewards + gamma * tf.reduce_max(self.targetModel(states), axis = 1) * (1 - dones)
+        Q_targets = rewards + (gamma * tf.reduce_max(self.targetModel(states), axis = 1) * (1 - dones))
 
         with tf.GradientTape() as tape:
             actionIndices = np.stack([np.array([i, action]) for i, action in enumerate(actions)])
 
-            fullPredictions = self.localModel(states, training=True)
-            predictions = tf.gather_nd(fullPredictions,actionIndices)
+            Q_expected_full = self.localModel(states, training=True)
+            Q_expected = tf.gather_nd(Q_expected_full,actionIndices)
 
-            loss_value = self.loss_fn(y_vals, predictions)
+            loss_value = self.loss_fn(Q_targets, Q_expected)
 
         grads = tape.gradient(loss_value, self.localModel.trainable_weights)
         self.optimizer.apply_gradients(zip(grads, self.localModel.trainable_weights))
@@ -116,7 +117,12 @@ class Agent():
         #target_model.set_weights(local_model.get_weights())
         target_weights = target_model.get_weights()
         local_weights = local_model.get_weights()
-        target_model.set_weights([target_weights[weightIndex] * (1 - TAU) + local_weights[weightIndex] * TAU for weightIndex in range(len(local_model.get_weights()))])
+        target_model.set_weights([target_weights[weightIndex].copy() * (1.0 - TAU) + local_weights[weightIndex].copy() * TAU for weightIndex in range(len(local_weights))])
+
+        weight_diverge = sum([tf.norm(target_model.get_weights()[i] - local_model.get_weights()[i], ord=1) for i in range(len(target_weights))]).numpy()
+        print('\r{:.1f}'.format(weight_diverge), end="")
+
+        a = 5
 
 
     def save(self, pathPrefix : str):
@@ -154,8 +160,6 @@ class ReplayBuffer:
     def sample(self):
         """Randomly sample a batch of experiences from memory."""
         experiences = random.sample(self.memory, k=self.batch_size)
-
-        #return experiences
 
         states = np.stack([e.state for e in experiences if e is not None])
         actions = np.stack([e.action for e in experiences if e is not None])
