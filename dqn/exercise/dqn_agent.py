@@ -66,7 +66,7 @@ class Agent():
                 experiences = self.memory.sample()
                 self.learn(experiences, GAMMA)
 
-    def act(self, state, eps):
+    def act(self, state, eps=0):
         """Returns actions for given state as per current policy.
         
         Params
@@ -74,9 +74,10 @@ class Agent():
             state (array_like): current state
             eps (float): epsilon, for epsilon-greedy action selection
         """
-        action_values = self.localModel(state.reshape([1, self.state_size]), training=False)[0]
 
-        # Epsilon-greedy action selection
+        action_values = self.localModel(state.reshape([1, self.state_size]))[0]
+
+        # Epsilon-greedy action selectionÎ
         if random.random() > eps:
             return np.argmax(action_values)
         else:
@@ -90,10 +91,9 @@ class Agent():
             experiences (Tuple[torch.Tensor]): tuple of (s, a, r, s', done) tuples 
             gamma (float): discount factor
         """
-
         states, actions, rewards, next_states, dones = experiences
 
-        Q_targets = rewards + (gamma * tf.reduce_max(self.targetModel(states), axis = 1) * (1 - dones))
+        Q_targets = rewards + (gamma * tf.reduce_max(self.targetModel(next_states), axis = 1) * (1 - dones))
 
         with tf.GradientTape() as tape:
             actionIndices = np.stack([np.array([i, action]) for i, action in enumerate(actions)])
@@ -103,8 +103,8 @@ class Agent():
 
             loss_value = self.loss_fn(Q_targets, Q_expected)
 
-        grads = tape.gradient(loss_value, self.localModel.trainable_weights)
-        self.optimizer.apply_gradients(zip(grads, self.localModel.trainable_weights))
+        grads = tape.gradient(loss_value, self.localModel.trainable_variables)
+        self.optimizer.apply_gradients(zip(grads, self.localModel.trainable_variables))
 
         #print("done learning")
         # ------------------- update target network ------------------- #
@@ -113,17 +113,8 @@ class Agent():
 
     def update(self, local_model : keras.Sequential, target_model : keras.Sequential):
 
-        #hard update instead
-        #target_model.set_weights(local_model.get_weights())
-        target_weights = target_model.get_weights()
-        local_weights = local_model.get_weights()
-        target_model.set_weights([target_weights[weightIndex].copy() * (1.0 - TAU) + local_weights[weightIndex].copy() * TAU for weightIndex in range(len(local_weights))])
-
-        weight_diverge = sum([tf.norm(target_model.get_weights()[i] - local_model.get_weights()[i], ord=1) for i in range(len(target_weights))]).numpy()
-        print('\r{:.1f}'.format(weight_diverge), end="")
-
-        a = 5
-
+        for t, l in zip(target_model.trainable_variables, local_model.trainable_variables):
+            t.assign(t * (1 - TAU) + l * TAU)
 
     def save(self, pathPrefix : str):
         self.localModel.save_weights(pathPrefix + ".ckpt")
