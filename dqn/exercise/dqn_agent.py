@@ -93,13 +93,17 @@ class Agent():
         """
         states, actions, rewards, next_states, dones = experiences
 
-        Q_targets = rewards + (gamma * tf.reduce_max(self.targetModel(next_states), axis = 1) * (1 - dones))
+        # for double Q learning, use the local model
+        max_local_next_states = tf.argmax(self.localModel(next_states), 1)
+
+        Q_targets = rewards + \
+                    (gamma * tf.gather(self.targetModel(next_states), max_local_next_states, axis=1, batch_dims=1) * (1 - dones))
 
         with tf.GradientTape() as tape:
-            actionIndices = np.stack([np.array([i, action]) for i, action in enumerate(actions)])
+            #actionIndices = np.stack([np.array([i, action]) for i, action in enumerate(actions)])
 
             Q_expected_full = self.localModel(states, training=True)
-            Q_expected = tf.gather_nd(Q_expected_full,actionIndices)
+            Q_expected = tf.gather(Q_expected_full,actions, axis=1, batch_dims=1)
 
             loss_value = self.loss_fn(Q_targets, Q_expected)
 
