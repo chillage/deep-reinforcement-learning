@@ -1,8 +1,7 @@
 import gym
 import random
-import torch
 from collections import deque
-from agent import Agent
+from agent_torch import Agent
 import matplotlib.pyplot as plt
 from unityagents import UnityEnvironment
 import numpy as np
@@ -16,9 +15,8 @@ brain = env.brains[brain_name]
 
 env_info = env.reset(train_mode=train_mode)[brain_name]
 agent = Agent(state_size=len(env_info.vector_observations[0]), action_size=brain.vector_action_space_size, seed=rand_seed)
-agent.load('trained_model')
 
-def dqn(n_episodes=2000, max_t=10000, eps_start=1.0, eps_end=0.01, eps_decay=0.995):
+def dqn(n_episodes=4000, max_t=1000, eps_start=1.0, eps_end=0.01, eps_decay=0.995):
     """Deep Q-Learning.
 
     Params
