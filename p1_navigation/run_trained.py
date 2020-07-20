@@ -1,7 +1,7 @@
 import gym
 import random
 from collections import deque
-from agent import Agent
+from agent_torch import Agent
 import matplotlib.pyplot as plt
 from unityagents import UnityEnvironment
 import numpy as np
