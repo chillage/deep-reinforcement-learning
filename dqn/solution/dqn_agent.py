@@ -116,6 +116,14 @@ class Agent():
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
             target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
 
+        with torch.no_grad():
+            weight_diverge = 0
+            for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
+                weight_diverge += torch.norm(target_param - local_param, p=1)
+            print('\r{:.1f}'.format(weight_diverge), end="")
+
+
+
 
 class ReplayBuffer:
     """Fixed-size buffer to store experience tuples."""
