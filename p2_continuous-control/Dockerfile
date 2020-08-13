@@ -1,20 +1,29 @@
-FROM pytorch/pytorch:0.4_cuda9_cudnn7
+FROM nvidia/cuda:10.2-base-ubuntu16.04
+#FROM pytorch/pytorch:0.4_cuda9_cudnn7
+#FROM pytorch/pytorch:1.6.0-cuda10.1-cudnn7-runtime
 
 RUN apt-get update && \
     apt-get -y install xvfb ffmpeg git build-essential
-RUN pip install --upgrade pip
-RUN pip install gym[box2d,atari] pybullet==2.8.1
-RUN git clone https://github.com/vwxyzjn/cleanrl && \
-    cd cleanrl && pip install -e .
-RUN apt-get -y install python-opengl
-RUN pip install opencv-python
-RUN pip install seaborn pandas
-RUN pip install stable-baselines3
-RUN pip install wandb
-RUN wandb login 3c5ceb4355fe069912a8ccad904c3ce950330282
-WORKDIR /workspace/cleanrl/cleanrl
 
-COPY entrypoint.sh /usr/local/bin/
-RUN chmod 777 /usr/local/bin/entrypoint.sh
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD python ppo2_continuous_action.py --capture-video --total-timesteps 200
+RUN apt-get -qq update && apt-get -qq -y install curl bzip2 \
+    && curl -sSL https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -o /tmp/miniconda.sh \
+    && bash /tmp/miniconda.sh -bfp /usr/local \
+    && rm -rf /tmp/miniconda.sh \
+    && conda install -y python=3.6 \
+    && conda update conda \
+    && apt-get -qq -y remove curl bzip2 \
+    && apt-get -qq -y autoremove \
+    && apt-get autoclean \
+    && rm -rf /var/lib/apt/lists/* /var/log/dpkg.log \
+    && conda clean --all --yes
+
+ENV PATH /opt/conda/bin:$PATH
+
+RUN pip install --upgrade pip
+
+RUN pip install gym[box2d,atari] pybullet==2.8.1
+RUN git clone https://github.com/udacity/deep-reinforcement-learning.git
+RUN cd deep-reinforcement-learning/python && pip install .
+
+
+
