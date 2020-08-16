@@ -2,9 +2,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from torch.utils.tensorboard import SummaryWriter
-
-from unityagents import UnityEnvironment
 
 import argparse
 from distutils.util import strtobool
