@@ -10,16 +10,17 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
+from unityagents import UnityEnvironment
+
 import argparse
 from distutils.util import strtobool
 import collections
 import numpy as np
-import gym
-from gym.wrappers import TimeLimit, Monitor
-from gym.spaces import Discrete, Box, MultiBinary, MultiDiscrete, Space
 import time
 import random
 import os
+
+from helpers import ReplayBuffer, QNetwork, Actor
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='DDPG agent')
@@ -34,8 +35,8 @@ if __name__ == "__main__":
                         help='seed of the experiment')
     parser.add_argument('--episode-length', type=int, default=0,
                         help='the maximum length of each episode')
-    parser.add_argument('--total-timesteps', type=int, default=1000000,
-                        help='total timesteps of the experiments')
+    parser.add_argument('--total-episodes', type=int, default=2000,
+                        help='total episodes of the experiments')
     parser.add_argument('--torch-deterministic', type=lambda x: bool(strtobool(x)), default=True, nargs='?', const=True,
                         help='if toggled, `torch.backends.cudnn.deterministic=False`')
     parser.add_argument('--cuda', type=lambda x: bool(strtobool(x)), default=True, nargs='?', const=True,
@@ -67,7 +68,7 @@ if __name__ == "__main__":
                         help='the scale of exploration noise')
     parser.add_argument('--learning-starts', type=int, default=25e3,
                         help="timestep to start learning")
-    parser.add_argument('--policy-frequency', type=int, default=2,
+    parser.add_argument('--policy-frequency', type=int, default=5,
                         help="the frequency of training policy (delayed)")
     parser.add_argument('--noise-clip', type=float, default=0.5,
                         help='noise clip parameter of the Target Policy Smoothing Regularization')
@@ -92,128 +93,75 @@ if args.prod_mode:
 
 # TRY NOT TO MODIFY: seeding
 device = torch.device('cuda' if torch.cuda.is_available() and args.cuda else 'cpu')
-env = gym.make(args.gym_id)
+
+#env = gym.make(args.gym_id)
+
+
 random.seed(args.seed)
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 torch.backends.cudnn.deterministic = args.torch_deterministic
-env.seed(args.seed)
-env.action_space.seed(args.seed)
-env.observation_space.seed(args.seed)
-# respect the default timelimit
-assert isinstance(env.action_space, Box), "only continuous action space is supported"
-assert isinstance(env, TimeLimit) or int(
-    args.episode_length), "the gym env does not have a built in TimeLimit, please specify by using --episode-length"
-if isinstance(env, TimeLimit):
-    if int(args.episode_length):
-        env._max_episode_steps = int(args.episode_length)
-    args.episode_length = env._max_episode_steps
-else:
-    env = TimeLimit(env, int(args.episode_length))
-if args.capture_video:
-    env = Monitor(env, f'videos/{experiment_name}')
 
 
-# modified from https://github.com/seungeunrho/minimalRL/blob/master/dqn.py#
-class ReplayBuffer():
-    def __init__(self, buffer_limit):
-        self.buffer = collections.deque(maxlen=buffer_limit)
-
-    def put(self, transition):
-        self.buffer.append(transition)
-
-    def sample(self, n):
-        mini_batch = random.sample(self.buffer, n)
-        s_lst, a_lst, r_lst, s_prime_lst, done_mask_lst = [], [], [], [], []
-
-        for transition in mini_batch:
-            s, a, r, s_prime, done_mask = transition
-            s_lst.append(s)
-            a_lst.append(a)
-            r_lst.append(r)
-            s_prime_lst.append(s_prime)
-            done_mask_lst.append(done_mask)
-
-        return np.array(s_lst), np.array(a_lst), \
-               np.array(r_lst), np.array(s_prime_lst), \
-               np.array(done_mask_lst)
 
 
-# ALGO LOGIC: initialize agent here:
-class QNetwork(nn.Module):
-    def __init__(self):
-        super(QNetwork, self).__init__()
-        self.fc1 = nn.Linear(
-            np.array(env.observation_space.shape).prod() + np.prod(env.action_space.shape), 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, 1)
+uenv = UnityEnvironment(file_name='Reacher_Linux_Multi/Reacher.x86_64')
+brain_name = uenv.brain_names[0]
+brain = uenv.brains[brain_name]
+# reset the environment
+env_info = uenv.reset(train_mode=True)[brain_name]
+action_size = brain.vector_action_space_size # number of actions
+state_size = env_info.vector_observations.shape[1] # number of observations/states
 
-    def forward(self, x, a):
-        x = torch.Tensor(x).to(device)
-        x = torch.cat([x, a], 1)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = self.fc3(x)
-        return x
+num_agents = len(env_info.agents)
+action_min = -1.0
+action_max = 1.0
 
 
-class Actor(nn.Module):
-    def __init__(self):
-        super(Actor, self).__init__()
-        self.fc1 = nn.Linear(np.array(env.observation_space.shape).prod(), 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc_mu = nn.Linear(256, np.prod(env.action_space.shape))
-
-    def forward(self, x):
-        x = torch.Tensor(x).to(device)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        return torch.tanh(self.fc_mu(x))
-
-
-def linear_schedule(start_sigma: float, end_sigma: float, duration: int, t: int):
-    slope = (end_sigma - start_sigma) / duration
-    return max(slope * t + start_sigma, end_sigma)
-
-
-max_action = float(env.action_space.high[0])
 rb = ReplayBuffer(args.buffer_size)
-actor = Actor().to(device)
-qf1 = QNetwork().to(device)
-qf1_target = QNetwork().to(device)
-target_actor = Actor().to(device)
+actor = Actor(device, action_size, state_size).to(device)
+qf1 = QNetwork(device, action_size, state_size).to(device)
+qf1_target = QNetwork(device, action_size, state_size).to(device)
+target_actor = Actor(device, action_size, state_size).to(device)
 target_actor.load_state_dict(actor.state_dict())
 qf1_target.load_state_dict(qf1.state_dict())
 q_optimizer = optim.Adam(list(qf1.parameters()), lr=args.learning_rate)
 actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.learning_rate)
 loss_fn = nn.MSELoss()
 # TRY NOT TO MODIFY: start the game
-obs = env.reset()
-episode_reward = 0
+env_info = uenv.reset(train_mode=True)[brain_name]
+states = env_info.vector_observations
+scores = np.zeros(num_agents)
+episode_num = 0
+global_step = 0
 
-for global_step in range(args.total_timesteps):
+while True:
+    global_step += 1
     # ALGO LOGIC: put action logic here
     if global_step < args.learning_starts:
-        action = env.action_space.sample()
+        actions = [action for action in np.random.randn(num_agents, action_size)]
     else:
-        action = actor.forward(obs.reshape((1,) + obs.shape))
-        action = (
-                action.tolist()[0]
-                + np.random.normal(0, max_action * args.exploration_noise, size=env.action_space.shape[0])
-        ).clip(env.action_space.low, env.action_space.high)
+        actions = [actor.forward(obs.reshape((1,) + state_size)) for obs in env_info.vector_observations]
+        actions = [(action.tolist()[0]
+                + np.random.normal(0, action_max * args.exploration_noise, size=action_size)
+        ).clip(action_min, action_max) for action in actions]
 
-    # TRY NOT TO MODIFY: execute the game and log data.
-    next_obs, reward, done, info = env.step(action)
-    episode_reward += reward
+    env_info = uenv.step(actions)[brain_name]
+    next_states = env_info.vector_observations  # get next state (for each agent)
+    rewards = env_info.rewards  # get reward (for each agent)
+    rewards = [0.1 if r > 0 else 0 for r in rewards]  # tweak for compatibility with this version of the env
+    dones = env_info.local_done
+
+    scores += rewards
 
     # ALGO LOGIC: training.
-    rb.put((obs, action, reward, next_obs, done))
+    rb.put(zip(states, actions, rewards, next_states, dones))
     if global_step > args.learning_starts:
         s_obs, s_actions, s_rewards, s_next_obses, s_dones = rb.sample(args.batch_size)
         with torch.no_grad():
             next_state_actions = (
                 target_actor.forward(s_next_obses)
-            ).clamp(env.action_space.low[0], env.action_space.high[0])
+            ).clamp(action_min, action_max)
             qf1_next_target = qf1_target.forward(s_next_obses, next_state_actions)
             next_q_value = torch.Tensor(s_rewards).to(device) + (1 - torch.Tensor(s_dones).to(device)) * args.gamma * (
                 qf1_next_target).view(-1)
@@ -240,18 +188,22 @@ for global_step in range(args.total_timesteps):
             for param, target_param in zip(qf1.parameters(), qf1_target.parameters()):
                 target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
 
-        if global_step % 100 == 0:
-            writer.add_scalar("losses/qf1_loss", qf1_loss.item(), global_step)
-            writer.add_scalar("losses/actor_loss", actor_loss.item(), global_step)
+        #if global_step % 100 == 0:
+        #    writer.add_scalar("losses/qf1_loss", qf1_loss.item(), global_step)
+        #    writer.add_scalar("losses/actor_loss", actor_loss.item(), global_step)
 
     # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
-    obs = next_obs
+    states = next_states
 
-    if done:
-        # TRY NOT TO MODIFY: record rewards for plotting purposes
-        print(f"global_step={global_step}, episode_reward={episode_reward}")
-        writer.add_scalar("charts/episode_reward", episode_reward, global_step)
-        obs, episode_reward = env.reset(), 0
+    if np.any(dones):
+        episode_num += 1
+        average_score = np.mean(scores)
+        print(f"Total score (averaged over agents) for episode {episode_num} :\t {average_score}")
+        writer.add_scalar("charts/episode_reward", average_score, episode_num)
+        obs, scores = uenv.reset(train_mode=True)[brain_name], np.zeros(num_agents)
 
-env.close()
+        if episode_num >= args.total_episodes:
+            break
+
+uenv.close()
 writer.close()

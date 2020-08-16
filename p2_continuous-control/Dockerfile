@@ -20,7 +20,7 @@ RUN pip install --upgrade pip
 
 RUN git clone https://github.com/udacity/deep-reinforcement-learning.git
 RUN cd deep-reinforcement-learning/python && pip install . \
-&& pip install torch==1.6 torchvision --upgrade-strategy only-if-needed \
+&& pip install torch==1.4 torchvision==0.5 --upgrade-strategy only-if-needed \
 && pip install tensorflow==2.3 tensorboard==2.3 grpcio==1.24.3
 
 RUN pip install wandb --upgrade-strategy only-if-needed
