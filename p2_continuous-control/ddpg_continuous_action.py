@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-#from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
 from unityagents import UnityEnvironment
 
@@ -78,8 +78,8 @@ if __name__ == "__main__":
 
 # TRY NOT TO MODIFY: setup the environment
 experiment_name = f"{args.gym_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-#writer = SummaryWriter(f"runs/{experiment_name}")
-#writer.add_text('hyperparameters', "|param|value|\n|-|-|\n%s" % ('\n'.join([f"|{key}|{value}|" for key, value in vars(args).items()])))
+writer = SummaryWriter(f"runs/{experiment_name}")
+writer.add_text('hyperparameters', "|param|value|\n|-|-|\n%s" % ('\n'.join([f"|{key}|{value}|" for key, value in vars(args).items()])))
 if args.prod_mode:
     if args.wandb_api_key is not None:
         os.environ['WANDB_API_KEY'] = args.wandb_api_key
@@ -88,7 +88,7 @@ if args.prod_mode:
 
     wandb.init(project=args.wandb_project_name, entity=args.wandb_entity, sync_tensorboard=True, config=vars(args),
                name=experiment_name, monitor_gym=True, save_code=True)
-    #writer = SummaryWriter(f"/tmp/{experiment_name}")
+    writer = SummaryWriter(f"/tmp/{experiment_name}")
 
 # TRY NOT TO MODIFY: seeding
 device = torch.device('cuda' if torch.cuda.is_available() and args.cuda else 'cpu')
@@ -200,11 +200,11 @@ while True:
         episode_num += 1
         average_score = np.mean(scores)
         print(f"Total score (averaged over agents) for episode {episode_num} :\t {average_score}")
-        #writer.add_scalar("charts/episode_reward", average_score, episode_num)
+        writer.add_scalar("charts/episode_reward", average_score, episode_num)
         obs, scores = uenv.reset(train_mode=True)[brain_name], np.zeros(num_agents)
 
         if episode_num >= args.total_episodes:
             break
 
 uenv.close()
-#writer.close()
+writer.close()
