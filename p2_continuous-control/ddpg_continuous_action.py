@@ -66,7 +66,7 @@ if __name__ == "__main__":
                         help="the batch size of sample from the reply memory")
     parser.add_argument('--exploration-noise', type=float, default=0.1,
                         help='the scale of exploration noise')
-    parser.add_argument('--learning-starts', type=int, default=25e3,
+    parser.add_argument('--learning-starts', type=int, default=5e3,
                         help="timestep to start learning")
     parser.add_argument('--policy-frequency', type=int, default=5,
                         help="the frequency of training policy (delayed)")
@@ -142,7 +142,7 @@ while True:
     if global_step < args.learning_starts:
         actions = [action for action in np.random.randn(num_agents, action_size)]
     else:
-        actions = [actor.forward(obs.reshape((1,) + state_size)) for obs in env_info.vector_observations]
+        actions = [actor.forward(obs.reshape((1,state_size))) for obs in env_info.vector_observations]
         actions = [(action.tolist()[0]
                 + np.random.normal(0, action_max * args.exploration_noise, size=action_size)
         ).clip(action_min, action_max) for action in actions]
