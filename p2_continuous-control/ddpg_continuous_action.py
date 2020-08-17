@@ -150,7 +150,6 @@ while True:
     env_info = uenv.step(actions)[brain_name]
     next_states = env_info.vector_observations  # get next state (for each agent)
     rewards = env_info.rewards  # get reward (for each agent)
-    rewards = [0.1 if r > 0 else 0 for r in rewards]  # tweak for compatibility with this version of the env
     dones = env_info.local_done
 
     scores += rewards
@@ -202,6 +201,8 @@ while True:
         print(f"Total score (averaged over agents) for episode {episode_num} :\t {average_score}")
         writer.add_scalar("charts/episode_reward", average_score, episode_num)
         obs, scores = uenv.reset(train_mode=True)[brain_name], np.zeros(num_agents)
+
+        torch.save(actor.state_dict(), 'torch_model.save')
 
         if episode_num >= args.total_episodes:
             break
